@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GeoLLM — Ask a place. Get the map.</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@500;600;800&family=Inter:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+:root{--bg:#f6f5f1;--ink:#0a0a0a;--mut:#74726c;--rule:#d8d5cb;--card:#0a0a0a;--ct:#f6f5f1;--cm:#8d8b85;--glass:rgba(246,245,241,.94);--gt:#0a0a0a;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0a0a0a;--ink:#f6f5f1;--mut:#8d8b85;--rule:#262625;--card:#171716;--ct:#f6f5f1;--cm:#8d8b85}}
+:root[data-theme="dark"]{--bg:#0a0a0a;--ink:#f6f5f1;--mut:#8d8b85;--rule:#262625;--card:#171716;--ct:#f6f5f1;--cm:#8d8b85}
+*{box-sizing:border-box}
+html{scroll-padding-top:env(safe-area-inset-top,0px);scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.w{max-width:1160px;margin:0 auto;padding:0 20px}
+.d{font-family:"Inter Tight",system-ui,sans-serif}
+nav{display:flex;justify-content:space-between;align-items:center;padding:20px 0}
+.logo{font:800 24px "Inter Tight",sans-serif;letter-spacing:-.04em;display:flex;align-items:center;gap:9px}
+.logo i{width:18px;height:18px;border-radius:50%;background:var(--ink);position:relative;display:block}
+.logo i:after{content:"";position:absolute;inset:5px;border-radius:50%;background:var(--bg)}
+nav div a{font:500 14px "Inter Tight",sans-serif;color:var(--ink);text-decoration:none;padding:9px 16px;border-radius:999px}
+nav div a:hover{background:var(--rule)}
+nav div a.cta{background:var(--ink);color:var(--bg);margin-left:6px}
+h1{font:800 clamp(52px,10.5vw,148px)/.88 "Inter Tight",sans-serif;letter-spacing:-.055em;margin:44px 0 0}
+.lede{display:flex;justify-content:space-between;gap:24px;flex-wrap:wrap;align-items:flex-end;margin:26px 0 34px}
+.lede p{margin:0;max-width:44ch;font-size:19px;line-height:1.4}
+.lede span{font:500 13px "Inter Tight",sans-serif;letter-spacing:.16em;color:var(--mut)}
+/* ---- stage / map ---- */
+.stage{position:relative;background:var(--card);color:var(--ct);border-radius:28px;overflow:hidden;height:clamp(460px,62vw,660px);isolation:isolate}
+#map{position:absolute;inset:0;width:100%;height:100%;background:var(--card);z-index:0}
+#map .leaflet-tile-pane{filter:grayscale(1) brightness(1.03) contrast(.95)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) #map .leaflet-tile-pane{filter:invert(1) grayscale(1) brightness(.92) contrast(.92)}}
+:root[data-theme="dark"] #map .leaflet-tile-pane{filter:invert(1) grayscale(1) brightness(.92) contrast(.92)}
+#map .leaflet-control-attribution{background:rgba(255,255,255,.75);color:#3c3a36;font:11px Inter,sans-serif}
+#map .leaflet-control-attribution a{color:#3c3a36}
+#map .leaflet-bar a{border-radius:8px}
+.leaflet-control-zoom{border:0!important;box-shadow:0 6px 20px rgba(0,0,0,.25)!important;margin:0 18px 18px 0!important}
+.leaflet-control-zoom a{background:var(--glass)!important;color:var(--gt)!important;border:0!important;width:34px;height:34px;line-height:34px}
+.leaflet-control-zoom a:first-child{border-radius:10px 10px 0 0!important}
+.leaflet-control-zoom a:last-child{border-radius:0 0 10px 10px!important}
+/* markers */
+.pin{position:relative;transform:translate(-50%,-50%);white-space:nowrap}
+.pin .dot{position:absolute;left:0;top:0;width:12px;height:12px;border-radius:50%;background:#0a0a0a;border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.45);transform:translate(-50%,-50%);animation:pinpop .4s cubic-bezier(.2,1.3,.5,1) both}
+.pin .ring{position:absolute;left:0;top:0;width:12px;height:12px;border-radius:50%;border:2px solid #0a0a0a;transform:translate(-50%,-50%);animation:p 2.2s ease-out infinite}
+:root[data-theme="dark"] .pin .dot,:root[data-theme="dark"] .pin .ring{background:#f6f5f1;border-color:#0a0a0a}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .pin .dot{border-color:#0a0a0a;background:#f6f5f1}:root:not([data-theme="light"]) .pin .ring{border-color:#f6f5f1}}
+.pin .lbl{position:absolute;left:13px;top:0;transform:translateY(-50%);font:800 13px "Inter Tight",sans-serif;color:var(--gt);background:var(--glass);padding:3px 9px;border-radius:999px;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+@keyframes pinpop{from{transform:translate(-50%,-50%) scale(0)}to{transform:translate(-50%,-50%) scale(1)}}
+@keyframes p{from{transform:translate(-50%,-50%) scale(.6);opacity:.85}to{transform:translate(-50%,-50%) scale(3.2);opacity:0}}
+/* ---- response card ---- */
+.res{position:absolute;left:18px;top:18px;z-index:2;max-width:352px;background:var(--glass);color:var(--gt);border-radius:18px;padding:13px 15px;box-shadow:0 10px 34px rgba(0,0,0,.28);backdrop-filter:blur(10px);animation:in .35s both}
+@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.res .head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.res code{flex:1;font:11.5px ui-monospace,Menlo,monospace;color:#6d6b65;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.res .more{border:0;background:none;font:600 12px "Inter Tight",sans-serif;color:#0a0a0a;cursor:pointer;border-bottom:1.5px solid #0a0a0a;padding:0 0 1px}
+.res b{font:600 16.5px/1.35 "Inter Tight",sans-serif;letter-spacing:-.01em;display:block}
+.res.compact b{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.res .meta{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+.res .chip{font:500 11.5px "Inter Tight",sans-serif;color:#55534d;background:rgba(0,0,0,.06);border-radius:999px;padding:3px 9px}
+.res .extra{display:none;margin-top:11px;border-top:1px solid rgba(0,0,0,.1);padding-top:10px}
+.res.open .extra{display:block}
+.res small{display:block;margin-top:7px;font-size:12px;color:#6d6b65;line-height:1.45}
+.res figure{margin:9px 0 0}.res img{display:block;width:100%;height:120px;object-fit:cover;border-radius:10px;background:#d8d5cb}.res figcaption{font-size:11.5px;color:#6d6b65;margin-top:4px}
+.res.err code{color:#b3261e}
+.res.err b{color:#b3261e}
+/* loading */
+.res.busy b{animation:bl 1.3s ease-in-out infinite;color:#6d6b65}
+@keyframes bl{50%{opacity:.4}}
+.res .bar{height:3px;border-radius:99px;margin-top:11px;background:rgba(0,0,0,.1);overflow:hidden}
+.res .bar i{display:block;height:100%;width:40%;border-radius:99px;background:#0a0a0a;animation:slide 1.1s ease-in-out infinite}
+@keyframes slide{0%{margin-left:-42%}100%{margin-left:102%}}
+/* ---- tools toggle + panel ---- */
+.toolsBtn{position:absolute;right:18px;top:18px;z-index:3;display:flex;align-items:center;gap:7px;font:600 13px "Inter Tight",sans-serif;color:var(--ct);background:rgba(20,20,20,.55);border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:8px 14px;cursor:pointer;backdrop-filter:blur(8px)}
+.toolsBtn:hover{background:rgba(20,20,20,.8)}
+.toolsBtn i{width:8px;height:8px;border-radius:50%;background:#7ee081;display:block}
+.tp{position:absolute;right:18px;top:60px;z-index:3;width:300px;max-height:calc(100% - 170px);overflow:auto;background:var(--glass);color:var(--gt);border-radius:18px;padding:8px;box-shadow:0 10px 34px rgba(0,0,0,.28);backdrop-filter:blur(10px);opacity:0;visibility:hidden;transform:translateX(12px);transition:opacity .22s,transform .22s,visibility .22s;scrollbar-width:thin}
+.tp.open{opacity:1;visibility:visible;transform:none}
+.tp h4{font:600 13px "Inter Tight",sans-serif;margin:8px 10px 6px;color:#6d6b65}
+.tr{display:flex;align-items:center;gap:10px;width:100%;border:0;background:none;text-align:left;padding:9px 10px;border-radius:12px;cursor:pointer;color:inherit;font:600 14px "Inter Tight",sans-serif}
+.tr:hover{background:rgba(0,0,0,.07)}.tr span{flex:1}.tr em{font-style:normal;color:#6d6b65;font-size:12px}.tr i,.leg i{width:9px;height:9px;border-radius:50%;border:1.5px solid #0a0a0a;flex:none;display:inline-block}.tr i.on,.leg i.on{background:#0a0a0a}
+.tx{display:none;padding:0 10px 10px 29px;font-size:12.5px;line-height:1.4;color:#55534d}.tx.open{display:block}
+.try{margin-top:6px;font:600 12px "Inter Tight",sans-serif;border:1.5px solid #0a0a0a;background:none;border-radius:999px;padding:4px 12px;cursor:pointer;color:#0a0a0a}.try:hover{background:#0a0a0a;color:#f6f5f1}.leg{margin:8px 10px 6px;font-size:12px;color:#6d6b65;display:flex;align-items:center;gap:6px}
+/* ---- dock / command bar ---- */
+.dock{position:absolute;left:50%;transform:translateX(-50%);bottom:16px;z-index:3;width:min(680px,calc(100% - 36px));display:flex;flex-direction:column;gap:9px}
+.chips{display:flex;gap:7px;overflow-x:auto;scrollbar-width:none;padding:2px 2px 0;justify-content:flex-start}
+.chips::-webkit-scrollbar{display:none}
+.chips button{flex:none;font:500 12.5px "Inter Tight",sans-serif;color:var(--ct);background:rgba(20,20,20,.5);border:1px solid rgba(255,255,255,.2);border-radius:999px;padding:7px 13px;cursor:pointer;backdrop-filter:blur(8px);white-space:nowrap}
+.chips button:hover{background:var(--ct);color:var(--card)}
+form{display:flex;align-items:center;gap:6px;background:var(--glass);border-radius:999px;padding:6px 6px 6px 8px;box-shadow:0 14px 40px rgba(0,0,0,.35)}
+form input{flex:1;min-width:0;border:0;background:none;font:500 16px Inter,sans-serif;color:var(--gt);padding:8px 10px}
+form input::placeholder{color:#8a8880}
+form .submit{border:0;border-radius:999px;background:#0a0a0a;color:#f6f5f1;cursor:pointer;width:44px;height:44px;display:flex;align-items:center;justify-content:center;flex:none}
+form .submit:hover{opacity:.85}
+form .submit svg{width:20px;height:20px}
+form.loading .submit{background:#6d6b65}
+form .submit .sp{display:none;width:16px;height:16px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .8s linear infinite}
+form.loading .submit svg{display:none}
+form.loading .submit .sp{display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
+form .submit:disabled{cursor:wait}
+button:focus-visible,input:focus-visible,a:focus-visible{outline:2px solid #4d8dff;outline-offset:2px}
+.fine{font-size:12.5px;color:var(--mut);margin:12px 6px 0}
+section{padding-top:110px}
+h2{font:800 clamp(34px,6vw,76px)/.92 "Inter Tight",sans-serif;letter-spacing:-.045em;margin:0 0 40px;max-width:14ch}
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));border-top:1px solid var(--ink)}
+.st{padding:22px 24px 8px 0}
+.st em{font:800 56px/1 "Inter Tight",sans-serif;font-style:normal;letter-spacing:-.05em;display:block;margin-bottom:34px}
+.st h3{font:600 24px/1.1 "Inter Tight",sans-serif;letter-spacing:-.02em;margin:0 0 8px}
+.st p{margin:0;color:var(--mut);max-width:30ch}
+.tools{display:flex;flex-wrap:wrap;gap:10px}
+.tools span{font:600 20px "Inter Tight",sans-serif;letter-spacing:-.02em;border:1.5px solid var(--ink);border-radius:999px;padding:10px 22px}
+.coin{background:var(--card);color:var(--ct);border-radius:28px;padding:clamp(26px,5vw,60px);display:grid;gap:22px}
+.coin h2{margin:0;max-width:none;font-size:clamp(60px,14vw,180px);line-height:.85}
+.coin p{margin:0;max-width:56ch;color:#c9c7c0;font-size:18px}
+.ca{font:13px ui-monospace,Menlo,monospace;border:1px dashed rgba(255,255,255,.3);border-radius:12px;padding:14px 16px;color:#a9a7a0;overflow-x:auto;white-space:nowrap}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.pill{font:600 15px "Inter Tight",sans-serif;padding:13px 24px;border-radius:999px;border:1.5px solid rgba(255,255,255,.35);color:var(--ct);opacity:.55}
+.coin .fine{color:#8d8b85;margin:0}
+footer{padding:70px 0 44px;color:var(--mut);font-size:13px;max-width:72ch}
+footer a{color:inherit}
+.cats{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:22px;overflow:hidden}.cat{background:var(--bg);padding:22px;display:flex;flex-direction:column;gap:8px}.cat h3{font:600 21px/1.1 "Inter Tight",sans-serif;letter-spacing:-.02em;margin:0}.cat p{margin:0;color:var(--mut);font-size:15px}.cat small{color:var(--mut);font-size:13px}.tag{align-self:flex-start;font:600 12px "Inter Tight",sans-serif;border-radius:999px;padding:3px 10px;border:1.5px solid var(--ink)}.tag.on{background:var(--ink);color:var(--bg)}.why{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:28px}.why b{font:600 22px/1.15 "Inter Tight",sans-serif;letter-spacing:-.02em;display:block;margin-bottom:6px}.why p{margin:0;color:var(--mut)}
+@media (max-width:760px){.tp{left:18px;right:18px;width:auto;top:60px;bottom:120px;max-height:none}.res{max-width:none;right:18px;top:60px}}
+@media (max-width:640px){nav div a:not(.cta){display:none}.stage{height:600px}.dock{bottom:12px}.chips button{font-size:12px}}
+@media (prefers-reduced-motion:reduce){.res,.res.busy b,.res .bar i,.pin .dot,.pin .ring{animation:none}.dot{animation:none}html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<div class="w">
+<nav><span class="logo"><i></i>GeoLLM</span><div><a href="#how">How it works</a><a href="#reach">Tools</a><a href="#coin">Coin</a><a class="cta" href="#demo">Try it</a></div></nav>
+
+<h1>Ask a place.<br>Get the map.</h1>
+<div class="lede"><p>An AI agent plugged into open geospatial tools. Weather, routes, places, air quality and satellite images today. Ships and planes next. Type a question, watch the answer land on the map.</p><span>ASK • MAP • TRACK</span></div>
+
+<div class="stage" id="demo">
+<div id="map" role="img" aria-label="World map"></div>
+<div class="res" id="res" aria-live="polite"><div class="head"><code>ready</code></div><b>Pick a question or write your own.</b></div>
+<button class="toolsBtn" id="toolsBtn" aria-expanded="false"><i></i>77 tools</button>
+<div class="tp" id="tp" aria-label="Available tools"></div>
+<div class="dock"><div class="chips" id="chips"></div>
+<form id="f"><input id="q" placeholder="Ask anything about a place…" aria-label="Your question" autocomplete="off" maxlength="200"><button class="submit" id="go" type="submit" aria-label="Ask"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h13"/><path d="M12 5l7 7-7 7"/></svg><span class="sp"></span></button></form></div>
+</div>
+<p class="fine">Live answers from open data. 10 questions per visitor per day. Questions are sent to a third-party AI model, so don't type personal information. AI answers can be wrong: check anything important.</p>
+
+<section id="how"><h2>Three steps, no map skills.</h2>
+<div class="steps">
+<div class="st"><em>1</em><h3>You ask</h3><p>Plain language. "Weather in Nuuk?" or "Route from Oslo to Stockholm."</p></div>
+<div class="st"><em>2</em><h3>The agent picks tools</h3><p>It calls open tools for geocoding, weather, air quality and routing.</p></div>
+<div class="st"><em>3</em><h3>You see it</h3><p>The camera flies to the answer and the data source is shown next to it.</p></div>
+</div></section>
+
+<section id="reach"><h2>Everything it can reach.</h2><div class="cats" id="cats"></div><p class="fine">First release: live now, free tools with no API key. Planned: not built yet, needs keys or extra setup. Counts are servers listed in the public catalog.</p></section>
+
+<section><h2>One protocol, many sources.</h2>
+<div class="why"><div><b>One standard</b><p>Swap a tool without rewriting the agent.</p></div><div><b>Combine sources</b><p>Weather, route and air quality in a single answer.</p></div><div><b>Open source</b><p>Most servers are public. The catalog marks official and community ones.</p></div><div><b>Free to start</b><p>Many tools need no API key at all.</p></div></div>
+<p class="fine">Picked from the public catalog at github.com/sparkgeo/geo-mcp-servers. Not affiliated with Sparkgeo or the listed projects.</p></section>
+
+<section id="coin"><div class="coin">
+<h2>$GEOLLM</h2>
+<p>An optional community coin on pump.fun. The tool exists with or without it. Holding it gives no guaranteed access, return or price increase.</p>
+<div class="ca">Contract address: announced at launch</div>
+<p class="fine">Always compare the address with the one on this site, the official X account and the GitHub README. Copycat tokens with the same name are common.</p>
+<div class="row"><span class="pill">pump.fun link soon</span><span class="pill">X link soon</span><span class="pill">GitHub repo soon</span></div>
+<p class="fine">Memecoins are highly speculative and most lose nearly all their value. Only risk what you can afford to lose. Not financial advice.</p>
+</div></section>
+
+<footer>GeoLLM is an independent experiment. Not affiliated with Anthropic, Mapbox, Esri or any provider named on this page.<br>Place data © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a> (ODbL), via Nominatim. Base map © OpenStreetMap contributors. Routes by Valhalla on the FOSSGIS server. <a href="https://open-meteo.com/">Weather data by Open-Meteo.com</a> (CC BY 4.0); air quality from Copernicus CAMS. Satellite previews contain modified Copernicus Sentinel data, found via Earth Search by Element 84.</footer>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function(){
+var res=document.getElementById('res'),go=document.getElementById('go'),form=document.getElementById('f'),busy=false,last=null;
+function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function isDark(){var t=document.documentElement.getAttribute('data-theme');if(t==='dark')return true;if(t==='light')return false;return matchMedia('(prefers-color-scheme:dark)').matches}
+function ink(){return getComputedStyle(document.body).color||'#0a0a0a'}
+
+/* ---- map ---- */
+var map=L.map('map',{zoomControl:false,attributionControl:true,worldCopyJump:true,minZoom:1,maxZoom:18});
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'}).addTo(map);
+L.control.zoom({position:'bottomright'}).addTo(map);
+map.setView([26,8],1);
+var layer=L.layerGroup().addTo(map);
+
+function pinIcon(name){return L.divIcon({className:'',html:'<div class="pin"><span class="ring"></span><span class="dot"></span><span class="lbl">'+esc(name)+'</span></div>',iconSize:[0,0],iconAnchor:[0,0]})}
+function valid(p){return Array.isArray(p)&&isFinite(p[0])&&isFinite(p[1])&&Math.abs(p[0])<=90&&Math.abs(p[1])<=180}
+function render(pts,route){
+  layer.clearLayers();
+  if(route&&route.length>1)L.polyline(route,{color:ink(),weight:3,opacity:.85,dashArray:'2 9',lineCap:'round'}).addTo(layer);
+  pts.forEach(function(p,i){setTimeout(function(){L.marker([p[0],p[1]],{icon:pinIcon(p[2]),keyboard:false}).addTo(layer)},i*280)});
+}
+function focus(pts,route){
+  var ll=pts.map(function(p){return [p[0],p[1]]}).concat(route||[]);
+  if(!ll.length)return;
+  if(ll.length===1){map.flyTo(ll[0],9,{duration:1.6});return}
+  map.flyToBounds(L.latLngBounds(ll),{padding:[80,80],maxZoom:12,duration:1.6});
+}
+
+/* ---- response card ---- */
+function card(o){
+  res.className='res'+(o.cls?' '+o.cls:'')+(o.expand?' compact':'');
+  var h='<div class="head"><code>'+esc(o.code||'')+'</code>'+(o.expand?'<button class="more" type="button">Details</button>':'')+'</div>';
+  h+='<b>'+esc(o.text||'')+'</b>';
+  if(o.img&&/^https:\/\//.test(o.img.url))h+='<figure><a href="'+esc(o.img.url)+'" target="_blank" rel="noopener"><img src="'+esc(o.img.url)+'" alt="'+esc(o.img.caption)+'" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest(\'figure\').remove()"></a><figcaption>'+esc(o.img.caption)+'</figcaption></figure>';
+  var meta=(o.chips||[]).map(function(c){return '<span class="chip">'+esc(c)+'</span>'}).join('');
+  if(meta)h+='<div class="meta">'+meta+'</div>';
+  if(o.extra)h+='<div class="extra">'+o.extra+'</div>';
+  res.innerHTML=h;
+  var m=res.querySelector('.more');
+  if(m)m.onclick=function(){var open=res.classList.toggle('open');res.classList.toggle('compact',!open);m.textContent=open?'Less':'Details'};
+}
+function loading(q){
+  res.className='res busy';
+  res.innerHTML='<div class="head"><code>thinking</code></div><b>'+esc(q)+'</b><div class="bar"><i></i></div>';
+}
+
+/* ---- ask ---- */
+function ask(t){
+  if(busy)return;t=String(t).trim().slice(0,200);if(!t)return;
+  busy=true;go.disabled=true;form.classList.add('loading');
+  document.querySelectorAll('.chips button,.try').forEach(function(b){b.disabled=true});
+  loading(t);
+  var ctl=new AbortController(),timer=setTimeout(function(){ctl.abort()},55000);
+  fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({question:t}),signal:ctl.signal})
+  .then(function(r){return r.json().catch(function(){return {}}).then(function(j){return {ok:r.ok,status:r.status,j:j}})})
+  .then(function(x){var j=x.j;
+    if(!x.ok){var code=x.status===429?'daily limit reached':x.status===503?'model unavailable':'error';card({code:code,text:j.message||'Something went wrong. Try again.',cls:'err'});return}
+    var chips=[];if(j.sources&&j.sources.length)chips.push(j.sources.join(' · '));if(typeof j.remaining==='number')chips.push(j.remaining+' left today');if(j.cached)chips.push('cached');
+    var extra='';
+    if(j.tool)extra+='<small><b>Tools:</b> '+esc(j.tool)+'</small>';
+    if(j.sources&&j.sources.length)extra+='<small><b>Sources:</b> '+esc(j.sources.join(', '))+'</small>';
+    card({code:j.tool?'tool · '+j.tool:'no tool call',text:j.text||'',chips:chips,extra:extra,img:j.image,expand:true});
+    var pts=(j.points||[]).filter(valid),route=(j.route||[]).filter(valid);
+    last={pts:pts,route:route};
+    if(pts.length){render(pts,route);focus(pts,route)}
+  })
+  .catch(function(e){card({code:'network error',text:e&&e.name==='AbortError'?'The answer took too long. Try again.':'Could not reach GeoLLM. Check your connection.',cls:'err'})})
+  .then(function(){clearTimeout(timer);busy=false;go.disabled=false;form.classList.remove('loading')});
+}
+form.onsubmit=function(e){e.preventDefault();var i=document.getElementById('q');if(i.value.trim()&&!busy){ask(i.value);i.value=''}};
+
+/* ---- suggestions ---- */
+['Weather in Nuuk','Route from Oslo to Stockholm','Air quality in Tokyo','Sunrise in Reykjavik','Where is Ilulissat?','Satellite image of Ilulissat','Planes over Amsterdam','Drive Lisbon to Porto + weather'].forEach(function(t){var b=document.createElement('button');b.type='button';b.textContent=t;b.onclick=function(){ask(t)};document.getElementById('chips').appendChild(b)});
+
+/* ---- catalog ---- */
+var K=[['Geocoding and places',12,'Names and addresses to coordinates and back.','Nominatim, OpenCage, Geoapify',1],['Weather and climate',11,'Forecasts, history, marine data, air quality.','Open-Meteo, NOAA, OpenAQ',1],['Routing',1,'Routes, travel times and isochrones.','Valhalla',1],['Maps and platforms',15,'Places, traffic and maps from the big providers.','Mapbox, Google Maps, TomTom, CARTO',0],['Earth observation',13,'Search satellite imagery and science datasets.','Sentinel-2 via Earth Search · Planetary Computer, Earth Engine, NASA next',1],['Spatial databases',3,'Ask questions of spatial data in plain language.','PostGIS, Overture Maps, Wherobots',0],['Desktop and enterprise GIS',9,'Drive QGIS or ArcGIS from a prompt.','QGIS, ArcGIS Pro',0],['Geoprocessing toolkits',3,'Convert, reproject and analyse raster and vector files.','GDAL, GeoServer',0],['Air and sea tracking',5,'Live aircraft and vessel positions.','ADS-B, AIS, Flightradar24',0],['Other',5,'IP location, time zones, land parcels.','IPinfo, Regrid, TimezoneToolkit',0]];
+document.getElementById('cats').innerHTML=K.map(function(c){return '<div class="cat"><span class="tag'+(c[4]?' on':'')+'">'+(c[4]?'First release':'Planned')+'</span><h3>'+c[0]+'</h3><p>'+c[2]+'</p><small>'+c[3]+' · '+c[1]+' servers</small></div>'}).join('');
+
+/* ---- tools panel (collapsible) ---- */
+var T=['Where is Ilulissat?','Weather in Tokyo','Route from Oslo to Stockholm',0,'Satellite image of Ilulissat',0,0,0,'Planes over Amsterdam',0],tp=document.getElementById('tp');
+tp.innerHTML='<h4>77 servers in the catalog</h4>'+K.map(function(c,i){return '<button class="tr" data-i="'+i+'" aria-expanded="false"><i class="'+(c[4]?'on':'')+'"></i><span>'+c[0]+'</span><em>'+c[1]+'</em></button><div class="tx" id="tx'+i+'">'+c[3]+'<br>'+(T[i]?'<button class="try" data-q="'+T[i]+'">Try it</button>':(c[4]?'':'Planned'))+'</div>'}).join('')+'<p class="leg"><i class="on"></i>first release <i></i>planned</p>';
+tp.onclick=function(e){var b=e.target.closest('button');if(!b)return;if(b.dataset.q){ask(b.dataset.q);closeTools();return}var x=document.getElementById('tx'+b.dataset.i);if(x){x.classList.toggle('open');b.setAttribute('aria-expanded',x.classList.contains('open'))}};
+var toolsBtn=document.getElementById('toolsBtn');
+function closeTools(){tp.classList.remove('open');toolsBtn.setAttribute('aria-expanded','false')}
+toolsBtn.onclick=function(){var open=tp.classList.toggle('open');toolsBtn.setAttribute('aria-expanded',String(open))};
+document.addEventListener('click',function(e){if(tp.classList.contains('open')&&!tp.contains(e.target)&&!toolsBtn.contains(e.target))closeTools()});
+
+/* ---- theme + resize ---- */
+matchMedia('(prefers-color-scheme:dark)').addEventListener('change',function(){if(last&&last.pts.length)render(last.pts,last.route)});
+window.addEventListener('resize',function(){map.invalidateSize()});
+setTimeout(function(){map.invalidateSize()},200);
+})();
+</script>
+</body>
+</html>

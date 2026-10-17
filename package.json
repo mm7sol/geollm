@@ -1,0 +1,13 @@
+{
+  "name": "geollm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Ask a place. Get the map. An AI agent on open geospatial tools.",
+  "engines": { "node": "22.x" },
+  "scripts": {
+    "dev": "vercel dev",
+    "test": "node test/agent.test.mjs",
+    "mcp": "node mcp/server.mjs"
+  }
+}
